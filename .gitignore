@@ -2,6 +2,8 @@
 *.png
 *.weights
 *.h5
+*.mat
+
 logs/
 *_test.py
 

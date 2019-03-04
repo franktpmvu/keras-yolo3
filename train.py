@@ -1,6 +1,8 @@
 """
 Retrain the YOLO model for your own dataset.
 """
+import os
+os.environ["CUDA_VISIBLE_DEVICES"]="2"
 
 import numpy as np
 import keras.backend as K
@@ -14,10 +16,14 @@ from yolo3.utils import get_random_data
 
 
 def _main():
-    annotation_path = 'train.txt'
-    log_dir = 'logs/000/'
-    classes_path = 'model_data/voc_classes.txt'
-    anchors_path = 'model_data/yolo_anchors.txt'
+    #annotation_path = 'data/voc/2007_train.txt'
+    #annotation_path = 'train_coco2014.txt'
+    annotation_path = 'CrowdHuman_onlyPVH_train.txt'
+    log_dir = 'logs/181227_PVH/'
+    #classes_path = 'model_data/voc_classes.txt'
+    #classes_path = 'model_data/coco_classes.txt'
+    classes_path = 'model_data/CrowdHuman_classesPVH.txt'
+    anchors_path = 'model_data/yolo_anchors_CH.txt'
     class_names = get_classes(classes_path)
     num_classes = len(class_names)
     anchors = get_anchors(anchors_path)
@@ -30,13 +36,19 @@ def _main():
             freeze_body=2, weights_path='model_data/tiny_yolo_weights.h5')
     else:
         model = create_model(input_shape, anchors, num_classes,
-            freeze_body=2, weights_path='model_data/yolo_weights.h5') # make sure you know what you freeze
+            freeze_body=2, weights_path='model_data/darknet53_weights.h5') # make sure you know what you freeze
+
+    '''
+    else:
+        model = create_model(input_shape, anchors, num_classes,
+            freeze_body=2, weights_path='model_data/darknet53_weights.h5') # make sure you know what you freeze
+    '''
 
     logging = TensorBoard(log_dir=log_dir)
     checkpoint = ModelCheckpoint(log_dir + 'ep{epoch:03d}-loss{loss:.3f}-val_loss{val_loss:.3f}.h5',
         monitor='val_loss', save_weights_only=True, save_best_only=True, period=3)
-    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=3, verbose=1)
-    early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=10, verbose=1)
+    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=100, verbose=1)
+    #early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=15, verbose=1)
 
     val_split = 0.1
     with open(annotation_path) as f:
@@ -73,15 +85,16 @@ def _main():
         model.compile(optimizer=Adam(lr=1e-4), loss={'yolo_loss': lambda y_true, y_pred: y_pred}) # recompile to apply the change
         print('Unfreeze all of the layers.')
 
-        batch_size = 32 # note that more GPU memory is required after unfreezing the body
+        batch_size = 8 # note that more GPU memory is required after unfreezing the body
         print('Train on {} samples, val on {} samples, with batch size {}.'.format(num_train, num_val, batch_size))
         model.fit_generator(data_generator_wrapper(lines[:num_train], batch_size, input_shape, anchors, num_classes),
             steps_per_epoch=max(1, num_train//batch_size),
             validation_data=data_generator_wrapper(lines[num_train:], batch_size, input_shape, anchors, num_classes),
             validation_steps=max(1, num_val//batch_size),
-            epochs=100,
+            epochs=1000,
             initial_epoch=50,
-            callbacks=[logging, checkpoint, reduce_lr, early_stopping])
+            #callbacks=[logging, checkpoint, reduce_lr, early_stopping])
+            callbacks=[logging, checkpoint, reduce_lr])
         model.save_weights(log_dir + 'trained_weights_final.h5')
 
     # Further training if needed.
@@ -126,7 +139,7 @@ def create_model(input_shape, anchors, num_classes, load_pretrained=True, freeze
             print('Freeze the first {} layers of total {} layers.'.format(num, len(model_body.layers)))
 
     model_loss = Lambda(yolo_loss, output_shape=(1,), name='yolo_loss',
-        arguments={'anchors': anchors, 'num_classes': num_classes, 'ignore_thresh': 0.5})(
+        arguments={'anchors': anchors, 'num_classes': num_classes, 'ignore_thresh': 0.5,'print_loss':False})(
         [*model_body.output, *y_true])
     model = Model([model_body.input, *y_true], model_loss)
 
@@ -172,7 +185,10 @@ def data_generator(annotation_lines, batch_size, input_shape, anchors, num_class
         for b in range(batch_size):
             if i==0:
                 np.random.shuffle(annotation_lines)
-            image, box = get_random_data(annotation_lines[i], input_shape, random=True)
+            try:
+                image, box = get_random_data(annotation_lines[i], input_shape, random=True)
+            except:
+                print(annotation_lines[i])
             image_data.append(image)
             box_data.append(box)
             i = (i+1) % n

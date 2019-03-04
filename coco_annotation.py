@@ -1,17 +1,18 @@
 import json
 from collections import defaultdict
-
+from os import getcwd
 name_box_id = defaultdict(list)
 id_name = dict()
 f = open(
-    "mscoco2017/annotations/instances_train2017.json",
+    #"mscoco2017/annotations/instances_train2017.json",
+    "data/coco/coco/annotations/instances_train2014.json",
     encoding='utf-8')
 data = json.load(f)
-
+wd = getcwd()
 annotations = data['annotations']
 for ant in annotations:
     id = ant['image_id']
-    name = 'mscoco2017/train2017/%012d.jpg' % id
+    name = '%s/data/coco/coco/images/train2014/COCO_train2014_%012d.jpg'%(wd,id)
     cat = ant['category_id']
 
     if cat >= 1 and cat <= 11:

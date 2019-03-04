@@ -1,7 +1,7 @@
 """Miscellaneous utility functions."""
 
 from functools import reduce
-
+from itertools import chain
 from PIL import Image
 import numpy as np
 from matplotlib.colors import rgb_to_hsv, hsv_to_rgb
@@ -119,3 +119,108 @@ def get_random_data(annotation_line, input_shape, random=True, max_boxes=20, jit
         box_data[:len(box)] = box
 
     return image_data, box_data
+
+def get_random_data_pairs(annotation_line, input_shape, random=True, max_boxes=20, jitter=.3, hue=.1, sat=1.5, val=1.5, proc_img=True, datalength=15):
+    '''random preprocessing for real-time data augmentation'''
+    line = annotation_line.split()
+    image = Image.open(line[0])
+    iw, ih = image.size
+    h, w = input_shape
+    basedatav=5
+    d_gain=datalength//basedatav
+
+    nowboxl=np.array([list(map(int,box.split(',')))for box in line[1:]])
+    
+    box=nowboxl.reshape(-1,d_gain*basedatav)
+    #print(nowboxl)
+    #print(box)
+    #print('test')
+    #print(box.shape)
+    #print(len(box))
+    if not random:
+        # resize image
+        scale = min(w/iw, h/ih)
+        nw = int(iw*scale)
+        nh = int(ih*scale)
+        dx = (w-nw)//2
+        dy = (h-nh)//2
+        image_data=0
+        if proc_img:
+            image = image.resize((nw,nh), Image.BICUBIC)
+            new_image = Image.new('RGB', (w,h), (128,128,128))
+            new_image.paste(image, (dx, dy))
+            image_data = np.array(new_image)/255.
+
+        # correct boxes
+        box_data = np.zeros((max_boxes,datalength))
+        if len(box)>0:
+            np.random.shuffle(box)
+            for d_gain_ind in range(d_gain):
+                np.random.shuffle(box)
+                nowshift=(d_gain_ind*basedatav)
+                if len(box)>max_boxes: box = box[:max_boxes]
+                box[:, [nowshift+0,nowshift+2]] = box[:, [nowshift+0,nowshift+2]]*scale + dx
+                box[:, [nowshift+1,nowshift+3]] = box[:, [nowshift+1,nowshift+3]]*scale + dy
+                box_data[:len(box)] = box
+        #print(box)
+        return image_data, box_data, d_gain
+
+    # resize image
+    new_ar = w/h * rand(1-jitter,1+jitter)/rand(1-jitter,1+jitter)
+    scale = rand(.25, 2)
+    if new_ar < 1:
+        nh = int(scale*h)
+        nw = int(nh*new_ar)
+    else:
+        nw = int(scale*w)
+        nh = int(nw/new_ar)
+    image = image.resize((nw,nh), Image.BICUBIC)
+
+    # place image
+    dx = int(rand(0, w-nw))
+    dy = int(rand(0, h-nh))
+    new_image = Image.new('RGB', (w,h), (128,128,128))
+    new_image.paste(image, (dx, dy))
+    image = new_image
+
+    # flip image or not
+    flip = rand()<.5
+    if flip: image = image.transpose(Image.FLIP_LEFT_RIGHT)
+
+    # distort image
+    hue = rand(-hue, hue)
+    sat = rand(1, sat) if rand()<.5 else 1/rand(1, sat)
+    val = rand(1, val) if rand()<.5 else 1/rand(1, val)
+    x = rgb_to_hsv(np.array(image)/255.)
+    x[..., 0] += hue
+    x[..., 0][x[..., 0]>1] -= 1
+    x[..., 0][x[..., 0]<0] += 1
+    x[..., 1] *= sat
+    x[..., 2] *= val
+    x[x>1] = 1
+    x[x<0] = 0
+    image_data = hsv_to_rgb(x) # numpy array, 0 to 1
+
+    # correct boxes
+    box_data = np.zeros((max_boxes,5*d_gain))
+    #print(box)
+    #print('after random \n')
+    #print(np.random.shuffle(box))
+    if len(box)>0:
+        np.random.shuffle(box)
+        for d_gain_ind in range(d_gain):
+            nowshift=(d_gain_ind*basedatav)
+            box[:, [nowshift+0,nowshift+2]] = box[:, [nowshift+0,nowshift+2]]*nw/iw + dx
+            box[:, [nowshift+1,nowshift+3]] = box[:, [nowshift+1,nowshift+3]]*nh/ih + dy
+            if flip: box[:, [nowshift+0,nowshift+2]] = w - box[:, [nowshift+2,nowshift+0]]
+            box[:, (nowshift+0):(nowshift+2)][box[:, (nowshift+0):(nowshift+2)]<0] = 0
+            box[:, nowshift+2][box[:, nowshift+2]>w] = w
+            box[:, nowshift+3][box[:, nowshift+3]>h] = h
+            box_w = box[:, nowshift+2] - box[:, nowshift+0]
+            box_h = box[:, nowshift+3] - box[:, nowshift+1]
+            box = box[np.logical_and(box_w>1, box_h>1)] # discard invalid box
+            if len(box)>max_boxes: box = box[:max_boxes]
+            box_data[:len(box)] = box
+    #print('box_data\n')
+    #print(box_data)
+    return image_data, box_data, d_gain
